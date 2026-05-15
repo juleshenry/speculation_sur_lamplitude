@@ -28,6 +28,27 @@ def ma_strategy(price):
     t = pd.DataFrame(trades, columns=["entry","exit","pct"])
     return m, p, buy, sell, t
 
+def strategy_return(price, entry_fast, entry_slow, exit_fast, exit_slow):
+    m = pd.DataFrame({entry_fast: price.rolling(entry_fast).mean(),
+                      entry_slow: price.rolling(entry_slow).mean(),
+                      exit_fast: price.rolling(exit_fast).mean(),
+                      exit_slow: price.rolling(exit_slow).mean()}).dropna()
+    p = price.reindex(m.index)
+    buy = (m[entry_fast] > m[entry_slow]) & (m[entry_fast].shift() <= m[entry_slow].shift()) & (m[entry_slow] > m[entry_slow].shift())
+    sell = (m[exit_fast] < m[exit_slow]) & (m[exit_fast].shift() >= m[exit_slow].shift())
+    pos = pd.Series(0, index=m.index)
+    state = 0
+    trades = 0
+    for dt in m.index:
+        if buy[dt]:
+            state = 1
+        elif sell[dt] and state:
+            state = 0
+            trades += 1
+        pos.at[dt] = state
+    strat = (1 + p.pct_change().fillna(0) * pos).cumprod()
+    return strat.iloc[-1] - 1, trades
+
 def rebalance_75_25(tqqq, ief):
     df = pd.concat({"tqqq": tqqq, "ief": ief}, axis=1).dropna()
     r = df.pct_change().fillna(0)
@@ -69,6 +90,27 @@ print(f"B&H    : {(bh.iloc[-1]-1)*100:.1f}%")
 print(f"75/25  : {(rb.iloc[-1]-1)*100:.1f}%")
 print(f"MA strat: {(strat.iloc[-1]-1)*100:.1f}%")
 print(trades.to_string(index=False))
+
+ef_list = [10, 15, 20, 30, 40, 50]
+es_list = [100, 150, 200, 250]
+xf_list = [5, 9, 12, 15]
+xs_list = [21, 30, 40, 50]
+rows = []
+for ef in ef_list:
+    for es in es_list:
+        if ef >= es:
+            continue
+        for xf in xf_list:
+            for xs in xs_list:
+                if xf >= xs:
+                    continue
+                ret, tr = strategy_return(tqqq, ef, es, xf, xs)
+                rows.append((ret, tr, ef, es, xf, xs))
+
+top = sorted(rows, reverse=True)[:10]
+print("\nTop MA sweeps (total return):")
+for ret, tr, ef, es, xf, xs in top:
+    print(f"{ret*100:7.1f}%  trades:{tr:2d}  entry {ef}/{es}  exit {xf}/{xs}")
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
 ax1.plot(p.index, p, color="#1f1f1f", lw=1.1, label="TQQQ")
